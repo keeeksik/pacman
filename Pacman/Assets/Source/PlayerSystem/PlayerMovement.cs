@@ -1,52 +1,94 @@
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
-[RequireComponent(typeof(InputListener))] // Требует наличие компонента PacmanInput
 public class PlayerMovement : MonoBehaviour
 {
-    public float moveSpeed = 5f; // Скорость движения
-    private Vector3 targetPosition; // Целевая позиция
-    private bool isMoving = false; // Двигается ли Pacman
-    private InputListener pacmanInput; // Ссылка на компонент ввода
+    public float moveSpeed = 5f;
+    public Tilemap tilemap;
+    public string wallTileName = "Wall";
+
+    private Vector3Int _currentCell;
+    private Vector2 _targetDirection;
+    private bool _isMoving = false;
+    private GameManager _gameManager;
 
     void Start()
     {
-        // Получаем компонент PacmanInput
-        pacmanInput = GetComponent<InputListener>();
-
-        // Начальная позиция Pacman (центр клетки)
-        targetPosition = transform.position;
+        _currentCell = tilemap.WorldToCell(transform.position);
+        SnapToGrid(); // Важно: привязываем к сетке при старте
+        _gameManager = FindObjectOfType<GameManager>();
+        if (_gameManager == null)
+        {
+            Debug.LogError("GameManager not found!");
+        }
     }
 
     void Update()
     {
-        // Если Pacman не движется, обрабатываем ввод
-        if (!isMoving && pacmanInput.Direction != Vector2.zero)
-        {
-            Move(pacmanInput.Direction);
-        }
+        if (GameManager.IsGameOver) return;
+        Vector2 inputDirection = PlayerInput.Instance.MoveDirection;
 
-        // Движение к целевой позиции
-        if (isMoving)
+        if (!_isMoving && inputDirection != Vector2.zero)
         {
-            transform.position = Vector3.MoveTowards(transform.position, targetPosition, moveSpeed * Time.deltaTime);
-
-            // Если Pacman достиг целевой позиции
-            if (transform.position == targetPosition)
-            {
-                isMoving = false;
-            }
+            TryMove(inputDirection);
         }
     }
 
-    void Move(Vector2 direction)
+    void FixedUpdate()
     {
-        // Проверка, можно ли двигаться в выбранном направлении
-        RaycastHit2D hit = Physics2D.Raycast(transform.position, direction, 1f);
-        if (hit.collider == null || !hit.collider.CompareTag("Wall"))
+        if (GameManager.IsGameOver) return;
+
+        if (_isMoving)
         {
-            // Устанавливаем новую целевую позицию
-            targetPosition = transform.position + (Vector3)direction;
-            isMoving = true;
+            MoveTowardsTarget();
+            //SnapToGrid(); // Привязываем к сетке ПОСЛЕ MoveTowardsTarget
+        }
+    }
+
+    void TryMove(Vector2 direction)
+    {
+        Vector3Int targetCell = _currentCell + Vector3Int.RoundToInt(new Vector3(direction.x, direction.y, 0));
+        if (IsCellWalkable(targetCell))
+        {
+            _targetDirection = direction;
+            _isMoving = true;
+        }
+    }
+
+    void MoveTowardsTarget()
+    {
+        Vector3 targetPosition = tilemap.GetCellCenterWorld(_currentCell + Vector3Int.RoundToInt(new Vector3(_targetDirection.x, _targetDirection.y, 0)));
+        transform.position = Vector3.MoveTowards(transform.position, targetPosition, moveSpeed * Time.deltaTime);
+        if (Vector3.Distance(transform.position, targetPosition) < 0.01f)
+        {
+            _currentCell += Vector3Int.RoundToInt(new Vector3(_targetDirection.x, _targetDirection.y, 0));
+            SnapToGrid(); // Важно! Привязываем к сетке, когда достигли цели
+
+            _isMoving = false;
+        }
+
+    }
+
+    void SnapToGrid()
+    {
+        transform.position = tilemap.GetCellCenterWorld(_currentCell);
+    }
+
+
+    bool IsCellWalkable(Vector3Int cell)
+    {
+        return tilemap.GetTile(cell) == null || tilemap.GetTile(cell).name != wallTileName;
+    }
+
+    void OnTriggerEnter2D(Collider2D other)
+    {
+        if (other.CompareTag("Point"))
+        {
+            _gameManager.CollectPoint(other.gameObject);
+        }
+        else if (other.CompareTag("Enemy"))
+        {
+            _gameManager.PlayerDied();
         }
     }
 }
